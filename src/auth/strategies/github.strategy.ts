@@ -19,7 +19,7 @@ export class GitHubStrategy extends PassportStrategy(Strategy, 'github') {
       clientID: configService.get<string>('GITHUB_CLIENT_ID'),
       clientSecret: configService.get<string>('GITHUB_CLIENT_SECRET'),
       callbackURL: configService.get<string>('GITHUB_CALLBACK_URL'),
-      scope: ['user:email'], // Ensure you have the necessary scopes
+      scope: ["user:email"], // Ensure you have the necessary scopes
     });
   }
 
@@ -30,13 +30,11 @@ export class GitHubStrategy extends PassportStrategy(Strategy, 'github') {
     done: Function,
   ): Promise<any> {
     try {
-      this.logger.debug(`GitHub Profile: ${JSON.stringify(profile)}`);
 
       const { id, username, emails, photos } = profile;
 
-      // Extract primary and verified email
-      const emailObj = emails.find(email => email.primary && email.verified);
-      const email = emailObj ? emailObj.value : null;
+      // Extract email from the emails array
+      const email = emails && emails.length > 0 ? emails[0].value : null;
 
       // Extract avatar URL
       const avatar_url = photos && photos.length > 0 ? photos[0].value : null;

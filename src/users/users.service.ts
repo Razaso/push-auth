@@ -60,6 +60,10 @@ export class UsersService {
   async findOrCreate(profile: OAuthUserProfile): Promise<User> {
     this.logger.log(`Attempting to find or create user with GitHub ID: ${profile.id}`);
 
+
+
+    console.log(" ********** profile: ", JSON.stringify(profile));
+    
     try {
       // Attempt to find the user by GitHub ID
       let user = await this.prisma.user.findUnique({

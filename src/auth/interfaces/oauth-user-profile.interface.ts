@@ -6,4 +6,3 @@ export interface OAuthUserProfile {
     email?: string;
     avatar_url?: string;
   }
-  

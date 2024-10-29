@@ -5,11 +5,11 @@ import { PrismaService } from '../prisma/prisma.service';
 export class MnemonicShareService {
   constructor(private prisma: PrismaService) {}
 
-  async create(userId: string, share1: string) {
+  async create(userId: string, share: string) {
     return this.prisma.mnemonicShare.create({
       data: {
         userId,
-        share1,
+        share,
       },
     });
   }
@@ -20,10 +20,10 @@ export class MnemonicShareService {
     });
   }
 
-  async update(userId: string, share1: string) {
+  async update(userId: string, share: string) {
     return this.prisma.mnemonicShare.update({
       where: { userId },
-      data: { share1 },
+      data: { share },
     });
   }
 

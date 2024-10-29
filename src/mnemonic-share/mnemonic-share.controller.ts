@@ -8,8 +8,8 @@ export class MnemonicShareController {
   constructor(private mnemonicShareService: MnemonicShareService) {}
 
   @Post(':userId')
-  async create(@Param('userId') userId: string, @Body('share1') share1: string) {
-    return this.mnemonicShareService.create(userId, share1);
+  async create(@Param('userId') userId: string, @Body('share') share: string) {
+    return this.mnemonicShareService.create(userId, share);
   }
 
   @Get(':userId')
@@ -18,8 +18,8 @@ export class MnemonicShareController {
   }
 
   @Put(':userId')
-  async update(@Param('userId') userId: string, @Body('share1') share1: string) {
-    return this.mnemonicShareService.update(userId, share1);
+  async update(@Param('userId') userId: string, @Body('share') share: string) {
+    return this.mnemonicShareService.update(userId, share);
   }
 
   @Delete(':userId')

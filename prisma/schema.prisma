@@ -22,14 +22,43 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   mnemonicShare MnemonicShare?
+  mnemonicShareTransaction MnemonicShareTransaction?  // Share3's transaction hash stored on server
+  challenge     Challenge[]
+}
 
+model Challenge {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  challenge String
+  createdAt DateTime @default(now())
+  expiresAt DateTime // Challenges should expire
+
+  @@index([userId])
 }
 
 model MnemonicShare {
-  id        String   @id @default(uuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id])
-  share1    String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id])
+  share           String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Share3's transaction hash stored on server (actual share on blockchain)
+model MnemonicShareTransaction {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id])
+  publicKey       String
+  counter         Int      @default(0)
+  credentialId    String   // WebAuthn credential ID
+  transactionHash String   // Hash of blockchain transaction containing Share3
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
 }
