@@ -57,6 +57,7 @@ model MnemonicShareTransaction {
   counter         Int      @default(0)
   credentialId    String   // WebAuthn credential ID
   transactionHash String   // Hash of blockchain transaction containing Share3
+  iv              String   // IV used for encryption
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

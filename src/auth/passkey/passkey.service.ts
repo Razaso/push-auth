@@ -72,6 +72,7 @@ export class PasskeyService {
           publicKey: Buffer.from(verification.registrationInfo?.credentialPublicKey).toString('base64'),
           counter: verification.registrationInfo?.counter,
           transactionHash: '',
+          iv: '',
           user: {
             connect: {
               id: userId
@@ -191,25 +192,33 @@ export class PasskeyService {
     }
   }
 
-  async storeTransactionHash(userId: string, transactionHash: string) {
-    return await this.prisma.mnemonicShareTransaction.update({
+  async storeTransactionHash(
+    userId: string,
+    transactionHash: string,
+    iv: string
+  ) {
+    return this.prisma.mnemonicShareTransaction.update({
       where: { userId },
       data: {
         transactionHash,
-        updatedAt: new Date(),
-      },
+        iv
+      }
     });
   }
 
   async getTransactionHash(userId: string) {
     const transaction = await this.prisma.mnemonicShareTransaction.findUnique({
-      where: { userId }
+      where: { userId },
+      select: {
+        transactionHash: true,
+        iv: true
+      }
     });
-    
+
     if (!transaction) {
-      throw new Error('Transaction not found for user');
+      throw new Error('Transaction not found');
     }
-    
-    return transaction.transactionHash;
+
+    return transaction;
   }
 }

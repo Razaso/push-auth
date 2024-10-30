@@ -57,15 +57,23 @@ export class PasskeyController {
   @Put('transaction/:userId')
   async storeTransactionHash(
     @Param('userId') userId: string,
-    @Body() data: { transactionHash: string }
+    @Body() data: { transactionHash: string; iv: string }
   ) {
-    return await this.passkeyService.storeTransactionHash(userId, data.transactionHash);
+    return await this.passkeyService.storeTransactionHash(
+      userId,
+      data.transactionHash,
+      data.iv
+    );
   }
 
   @Get('transaction/:userId')
   async getTransactionHash(@Param('userId') userId: string) {
     try {
-      return await this.passkeyService.getTransactionHash(userId);
+      const result = await this.passkeyService.getTransactionHash(userId);
+      return {
+        transactionHash: result.transactionHash,
+        iv: result.iv
+      };
     } catch (error) {
       throw new NotFoundException(error.message);
     }
