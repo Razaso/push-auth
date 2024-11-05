@@ -1,32 +1,77 @@
-// src/auth/auth.service.ts
-
-import { Injectable } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
-import { UsersService } from '../users/users.service';
-import { OAuthUserProfile } from './interfaces/oauth-user-profile.interface';
-import { User } from '@prisma/client';
+import axios from 'axios';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly usersService: UsersService, // Inject UsersService
-    private readonly jwtService: JwtService,     // Inject JwtService
+    private prisma: PrismaService,
+    private jwtService: JwtService
   ) {}
 
-  /**
-   * Validates the OAuth login and returns user and JWT token.
-   * @param profile OAuth user profile data.
-   */
-  async validateOAuthLogin(profile: OAuthUserProfile): Promise<{ user: User; token: string }> {
-    // Use UsersService to find or create the user
-    const user = await this.usersService.findOrCreate(profile);
+  async exchangeCodeForTokens(code: string) {
+    try {
+      const response = await axios.post(`https://${process.env.AUTH0_DOMAIN}/oauth/token`, {
+        grant_type: 'authorization_code',
+        client_id: process.env.AUTH0_CLIENT_ID,
+        client_secret: process.env.AUTH0_CLIENT_SECRET,
+        code,
+        redirect_uri: `${process.env.BACKEND_URL}/auth/callback`
+      });
 
-    // Generate JWT token with user payload
-    const payload = { username: user.username, sub: user.id };
-    const token = this.jwtService.sign(payload);
+      return response.data;
+    } catch (error) {
+      throw new HttpException('Failed to exchange code for tokens', HttpStatus.BAD_REQUEST);
+    }
+  }
 
-    console.log(`Generated JWT token for user ID: ${user.id}`);
+  async getUserProfile(accessToken: string) {
+    try {
+      const response = await axios.get(`https://${process.env.AUTH0_DOMAIN}/userinfo`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      return response.data;
+    } catch (error) {
+      throw new HttpException('Failed to get user profile', HttpStatus.BAD_REQUEST);
+    }
+  }
 
-    return { user, token };
+  async findOrCreateUser(auth0User: any) {
+    const user = await this.prisma.user.upsert({
+      where: { email: auth0User.email },
+      update: {
+        username: auth0User.nickname,
+        auth0Id: auth0User.sub,
+        avatarUrl: auth0User.picture,
+        updatedAt: new Date(),
+      },
+      create: {
+        email: auth0User.email,
+        username: auth0User.nickname,
+        auth0Id: auth0User.sub,
+        avatarUrl: auth0User.picture,
+      },
+    });
+
+    return user;
+  }
+
+  async generateJWT(user: any) {
+    const payload = { 
+      sub: user.id,
+      email: user.email,
+      username: user.username
+    };
+    
+    return this.jwtService.sign(payload);
+  }
+
+  async validateUser(payload: any) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub }
+    });
+    
+    return user;
   }
 }

@@ -2,7 +2,8 @@
 
 import { Injectable, NotFoundException, ConflictException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { OAuthUserProfile } from '../auth/interfaces/oauth-user-profile.interface';
+// import { OAuthUserProfile } from '../auth/interfaces/oauth-user-profile.interface';
+import { Auth0Profile } from '../auth/interfaces/auth0-profile.interface';
 import { User } from '@prisma/client';
 
 @Injectable()
@@ -57,35 +58,30 @@ export class UsersService {
    * @param profile - OAuth user profile data.
    * @returns The user entity.
    */
-  async findOrCreate(profile: OAuthUserProfile): Promise<User> {
-    this.logger.log(`Attempting to find or create user with GitHub ID: ${profile.id}`);
-
-
-
-    console.log(" ********** profile: ", JSON.stringify(profile));
+  async findOrCreate(profile: Auth0Profile): Promise<User> {
+    this.logger.log(`Attempting to find or create user with GitHub ID: ${profile.sub}`);
     
     try {
       // Attempt to find the user by GitHub ID
       let user = await this.prisma.user.findUnique({
-        where: { githubId: profile.id },
+        where: { auth0Id: profile.sub },
       });
 
       if (!user) {
-        this.logger.log(`No user found with GitHub ID: ${profile.id}. Creating a new user.`);
+        this.logger.log(`No user found with GitHub ID: ${profile.sub}. Creating a new user.`);
 
         // If not found, create a new user
         user = await this.prisma.user.create({
           data: {
-            githubId: profile.id,
-            username: profile.username,
+            auth0Id: profile.sub,
+            username: profile.nickname || profile.email,
             email: profile.email,
-            avatarUrl: profile.avatar_url,
-            // Add other relevant fields
+            avatarUrl: profile.picture,
           },
         });
-        this.logger.log(`Created new user with GitHub ID: ${profile.id}`);
+        this.logger.log(`Created new user with GitHub ID: ${profile.sub}`);
       } else {
-        this.logger.log(`Found existing user with GitHub ID: ${profile.id}`);
+        this.logger.log(`Found existing user with GitHub ID: ${profile.sub}`);
       }
 
       return user;
@@ -100,40 +96,39 @@ export class UsersService {
   }
 
   /**
-   * Finds a user by their GitHub ID.
-   * @param githubId - GitHub unique identifier.
+   * Finds a user by their Auth0 ID.
+   * @param auth0Id - Auth0 unique identifier.
    * @returns The user entity or null if not found.
    */
-  async findOneByGitHubId(githubId: string): Promise<User | null> {
+  async findOneByAuth0Id(auth0Id: string): Promise<User | null> {
     return this.prisma.user.findUnique({
-      where: { githubId },
+      where: { auth0Id },
     });
   }
 
-  /**
-   * Creates a user from OAuth profile data.
-   * @param profile - OAuth user profile data.
+    /**
+   * Creates a user from Auth0 profile data.
+   * @param profile - Auth0 user profile data.
    * @returns The user entity.
    * @throws ConflictException if the user already exists.
    */
-  async createFromOAuthProfile(profile: OAuthUserProfile): Promise<User> {
-    try {
-      return await this.prisma.user.create({
-        data: {
-          githubId: profile.id,
-          username: profile.username,
-          email: profile.email,
-          avatarUrl: profile.avatar_url,
-          // Add other relevant fields
-        },
-      });
-    } catch (error) {
-      if (error.code === 'P2002') { // Unique constraint failed
-        throw new ConflictException('User already exists');
+    async createFromAuth0Profile(profile: any): Promise<User> {
+      try {
+        return await this.prisma.user.create({
+          data: {
+            auth0Id: profile.sub,
+            username: profile.nickname || profile.email,
+            email: profile.email,
+            avatarUrl: profile.picture,
+          },
+        });
+      } catch (error) {
+        if (error.code === 'P2002') {
+          throw new ConflictException('User already exists');
+        }
+        throw error;
       }
-      throw error; // Re-throw other errors
     }
-  }
 
   // ... Additional methods like updateUser, deleteUser, etc., can be added here
 }

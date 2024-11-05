@@ -1,65 +1,112 @@
-// src/auth/auth.controller.ts
-
-import { Controller, Get, Req, Res, UseGuards, Logger, Query } from '@nestjs/common';
+import { Controller, Get, UseGuards, Req, Res, Logger, Query } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
-import { v4 as uuidv4 } from 'uuid'; // For UUID generation if needed
-import { OAuthUserProfile } from '../auth/interfaces/oauth-user-profile.interface';
+import { v4 as uuidv4 } from 'uuid';
 
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
-  private tempTokenStore: Map<string, string> = new Map(); // In-memory store for simplicity
+  private tempTokenStore: Map<string, string> = new Map();
 
-  constructor(private authService: AuthService) {}
+  constructor(private readonly authService: AuthService) {}
 
-  /**
-   * Initiates GitHub OAuth login.
-   * @route GET /auth/github
-   */
-  @Get('github')
-  @UseGuards(AuthGuard('github'))
-  async githubAuth(@Req() req: Request, @Res() res: Response) {
-    // Initiated by GitHubStrategy, no additional handling needed here
+  @Get('login')
+  @UseGuards(AuthGuard('auth0'))
+  async login() {
+    // Auth0 will handle the login
   }
 
-  /**
-   * Handles the OAuth callback from GitHub
-   * @route GET /auth/github/callback
-   */
-  @Get('github/callback')
-  @UseGuards(AuthGuard('github'))
-  async githubAuthRedirect(@Req() req: Request, @Res() res: Response) {
+  @Get('authorize-email')
+  async authorizeEmail(
+    @Query('email') email: string,
+    @Res() res: Response
+  ) {
+    const state = uuidv4();
+    this.tempTokenStore.set(state, 'pending');
+    
+    const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
+      `response_type=code&` +
+      `client_id=${process.env.AUTH0_CLIENT_ID}&` +
+      `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
+      `scope=openid profile email&` +
+      `state=${state}&` +
+      `connection=email&` +
+      `login_hint=${encodeURIComponent(email)}`;
+
+    res.redirect(auth0Url);
+  }
+  
+  @Get('email-login')
+  async emailLogin(
+    @Query('email') email: string,
+    @Res() res: Response
+  ) {
+    const state = uuidv4();
+    this.tempTokenStore.set(state, 'pending');
+    
+    // Construct Auth0 URL for passwordless email login
+    const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
+      `response_type=code&` +
+      `client_id=${process.env.AUTH0_CLIENT_ID}&` +
+      `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
+      `scope=openid profile email&` +
+      `state=${state}&` +
+      `connection=email&` +
+      `login_hint=${encodeURIComponent(email)}`;
+
+    res.redirect(auth0Url);
+  }
+
+  @Get('email-signup')
+  async emailSignup(
+    @Query('email') email: string,
+    @Res() res: Response
+  ) {
+    const state = uuidv4();
+    this.tempTokenStore.set(state, 'pending');
+    
+    // Construct Auth0 URL for passwordless email signup
+    const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
+      `response_type=code&` +
+      `client_id=${process.env.AUTH0_CLIENT_ID}&` +
+      `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
+      `scope=openid profile email&` +
+      `state=${state}&` +
+      `screen_hint=signup&` +
+      `connection=email&` +
+      `login_hint=${encodeURIComponent(email)}`;
+
+    res.redirect(auth0Url);
+  }
+
+  @Get('callback')
+  async callback(@Query('code') code: string, @Res() res: Response) {
     try {
-      // The GitHubStrategy's validate method returns an OAuthUserProfile
-      const profile = req.user as OAuthUserProfile;
+      // Exchange the code for tokens
+      const tokens = await this.authService.exchangeCodeForTokens(code);
+      
+      // Get user profile using the access token
+      const profile = await this.authService.getUserProfile(tokens.access_token);
+      
+      // Create or update user in our database
+      const user = await this.authService.findOrCreateUser(profile);
+      
+      // Generate our own JWT
+      const jwt = await this.authService.generateJWT(user);
 
-      this.logger.log(`Received profile from GitHub: ${JSON.stringify(profile)}`);
+      // Generate new state for frontend token retrieval
+      const newState = uuidv4();
+      this.tempTokenStore.set(newState, jwt);
 
-      // Validate OAuth login and get user and token
-      const { user, token } = await this.authService.validateOAuthLogin(profile);
-
-      this.logger.log(`Generated JWT token for user ID: ${user.id}`);
-
-      // Generate a unique state identifier
-      const state = uuidv4();
-
-      // Store the JWT temporarily associated with the state
-      this.tempTokenStore.set(state, token);
-
-      // Redirect to frontend with the state as a query parameter
-      res.redirect(`${process.env.FRONTEND_URL}/push-keys/#/profile?state=${state}`);
+      // Redirect back to frontend with state
+      res.redirect(`${process.env.FRONTEND_URL}/push-keys/#/profile?state=${newState}`);
     } catch (error) {
-      this.logger.error('Error during OAuth callback:', error);
+      this.logger.error('Auth callback error:', error);
       res.redirect(`${process.env.FRONTEND_URL}/login?error=authentication_failed`);
     }
   }
 
-  /**
-   * Retrieves the JWT token associated with a given state
-   * @route GET /auth/jwt
-   */
   @Get('jwt')
   async getJwt(@Req() req: Request, @Res() res: Response) {
     const { state } = req.query;
@@ -74,30 +121,25 @@ export class AuthController {
       return res.status(401).json({ error: 'Unauthorized or expired state parameter' });
     }
 
-    // Optionally, remove the token from the temporary store to prevent reuse
+    // Remove the token from the temporary store to prevent reuse
     this.tempTokenStore.delete(state);
 
     return res.json({ token });
   }
 
-  /**
-   * Endpoint to get the authenticated user's profile
-   * @route GET /auth/user
-   */
   @Get('user')
   @UseGuards(AuthGuard('jwt'))
-  async getUser(@Req() req: any, @Res() res: Response) {
-    res.json(req.user);
+  async getUser(@Req() req: any) {
+    return req.user;
   }
 
-  /**
-   * Logout endpoint
-   * @route GET /auth/logout
-   */
   @Get('logout')
-  async logout(@Req() req: Request, @Res() res: Response) {
-    // If using cookies, clear them here
-    // Since we're using in-memory store, no action needed
-    res.redirect(`${process.env.FRONTEND_URL}`);
+  async logout(@Res() res: Response) {
+    const returnTo = encodeURIComponent(process.env.FRONTEND_URL);
+    res.redirect(
+      `https://${process.env.AUTH0_DOMAIN}/v2/logout?` +
+      `client_id=${process.env.AUTH0_CLIENT_ID}&` +
+      `returnTo=${returnTo}`
+    );
   }
 }
