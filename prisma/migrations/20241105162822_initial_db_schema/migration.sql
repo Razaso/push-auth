@@ -1,9 +1,10 @@
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
-    "githubId" TEXT NOT NULL,
-    "username" TEXT NOT NULL,
+    "auth0Id" TEXT NOT NULL,
     "email" TEXT,
+    "phone" TEXT,
+    "username" TEXT NOT NULL,
     "avatarUrl" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -37,8 +38,11 @@ CREATE TABLE "MnemonicShare" (
 CREATE TABLE "MnemonicShareTransaction" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
+    "publicKey" TEXT NOT NULL,
+    "counter" INTEGER NOT NULL DEFAULT 0,
     "credentialId" TEXT NOT NULL,
     "transactionHash" TEXT NOT NULL,
+    "iv" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -46,13 +50,7 @@ CREATE TABLE "MnemonicShareTransaction" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_githubId_key" ON "User"("githubId");
-
--- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
-
--- CreateIndex
-CREATE UNIQUE INDEX "Challenge_userId_key" ON "Challenge"("userId");
+CREATE UNIQUE INDEX "User_auth0Id_key" ON "User"("auth0Id");
 
 -- CreateIndex
 CREATE INDEX "Challenge_userId_idx" ON "Challenge"("userId");

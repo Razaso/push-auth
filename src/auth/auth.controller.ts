@@ -36,62 +36,74 @@ export class AuthController {
 
     res.redirect(auth0Url);
   }
+
+  @Get('authorize-social')
+  async authorizeSocial(
+    @Query('provider') provider: 'github' | 'google' | 'discord' | 'twitter',
+    @Res() res: Response
+  ) {
+    const state = uuidv4();
+    this.tempTokenStore.set(state, 'pending');
+    
+    // Map provider to correct connection name
+    const connectionMap = {
+      google: 'google-oauth2',
+      github: 'github',
+      discord: 'discord',
+      twitter: 'twitter'
+    };
+
+    const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
+      `response_type=code&` +
+      `client_id=${process.env.AUTH0_CLIENT_ID}&` +
+      `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
+      `scope=openid profile email&` +
+      `state=${state}&` +
+      `connection=${connectionMap[provider]}`;
+
+    res.redirect(auth0Url);
+  }
+
+  @Get('authorize-phone')
+  async authorizePhone(
+    @Query('phone') phone: string,
+    @Res() res: Response
+  ) {
+    const state = uuidv4();
+    this.tempTokenStore.set(state, 'pending');
+    
+    const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
+      `response_type=code&` +
+      `client_id=${process.env.AUTH0_CLIENT_ID}&` +
+      `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
+      `scope=openid profile email&` +
+      `state=${state}&` +
+      `connection=sms&` +
+      `login_hint=${encodeURIComponent(phone)}`;
+
+    res.redirect(auth0Url);
+  }
   
-  @Get('email-login')
-  async emailLogin(
-    @Query('email') email: string,
-    @Res() res: Response
-  ) {
-    const state = uuidv4();
-    this.tempTokenStore.set(state, 'pending');
-    
-    // Construct Auth0 URL for passwordless email login
-    const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
-      `response_type=code&` +
-      `client_id=${process.env.AUTH0_CLIENT_ID}&` +
-      `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
-      `scope=openid profile email&` +
-      `state=${state}&` +
-      `connection=email&` +
-      `login_hint=${encodeURIComponent(email)}`;
-
-    res.redirect(auth0Url);
-  }
-
-  @Get('email-signup')
-  async emailSignup(
-    @Query('email') email: string,
-    @Res() res: Response
-  ) {
-    const state = uuidv4();
-    this.tempTokenStore.set(state, 'pending');
-    
-    // Construct Auth0 URL for passwordless email signup
-    const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
-      `response_type=code&` +
-      `client_id=${process.env.AUTH0_CLIENT_ID}&` +
-      `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
-      `scope=openid profile email&` +
-      `state=${state}&` +
-      `screen_hint=signup&` +
-      `connection=email&` +
-      `login_hint=${encodeURIComponent(email)}`;
-
-    res.redirect(auth0Url);
-  }
-
   @Get('callback')
   async callback(@Query('code') code: string, @Res() res: Response) {
     try {
+
+      console.log('code', code)
       // Exchange the code for tokens
       const tokens = await this.authService.exchangeCodeForTokens(code);
       
+      console.log('tokens', tokens)
+
       // Get user profile using the access token
       const profile = await this.authService.getUserProfile(tokens.access_token);
       
+      console.log('profile', profile)
+
       // Create or update user in our database
       const user = await this.authService.findOrCreateUser(profile);
       
+      console.log('user', user)
+
       // Generate our own JWT
       const jwt = await this.authService.generateJWT(user);
 

@@ -38,23 +38,48 @@ export class AuthService {
   }
 
   async findOrCreateUser(auth0User: any) {
-    const user = await this.prisma.user.upsert({
-      where: { email: auth0User.email },
-      update: {
-        username: auth0User.nickname,
-        auth0Id: auth0User.sub,
-        avatarUrl: auth0User.picture,
-        updatedAt: new Date(),
-      },
-      create: {
-        email: auth0User.email,
-        username: auth0User.nickname,
-        auth0Id: auth0User.sub,
-        avatarUrl: auth0User.picture,
-      },
-    });
+    const [provider, providerId] = auth0User.sub.split('|');
+    const username = auth0User.nickname || `User${providerId.slice(-4)}`;
+    
+    if (provider === 'sms') {
+      // Phone-based authentication
+      return this.prisma.user.upsert({
+        where: { auth0Id: auth0User.sub },
+        update: {
+          phone: auth0User.phone_number,
+          username,
+          avatarUrl: auth0User.picture,
+          updatedAt: new Date(),
+        },
+        create: {
+          phone: auth0User.phone_number,
+          email: null,
+          username,
+          auth0Id: auth0User.sub,
+          avatarUrl: auth0User.picture,
+        },
+      });
+    } else {
+      // Social/Email authentication
+      const email = auth0User.email || `${providerId}@${provider}.placeholder.com`;
 
-    return user;
+      return this.prisma.user.upsert({
+        where: { auth0Id: auth0User.sub },
+        update: {
+          email,
+          username,
+          avatarUrl: auth0User.picture,
+          updatedAt: new Date(),
+        },
+        create: {
+          email,
+          phone: null,
+          username,
+          auth0Id: auth0User.sub,
+          avatarUrl: auth0User.picture,
+        },
+      });
+    }
   }
 
   async generateJWT(user: any) {
