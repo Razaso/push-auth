@@ -3,11 +3,19 @@ import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import axios from 'axios';
 
+interface TokenPayload {
+  sub: string;
+  email: string;
+  username: string;
+  auth0Token: string;
+  auth0Expiry: number;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
     private prisma: PrismaService,
-    private jwtService: JwtService
+    private jwtService: JwtService,
   ) {}
 
   async exchangeCodeForTokens(code: string) {
@@ -23,6 +31,28 @@ export class AuthService {
       return response.data;
     } catch (error) {
       throw new HttpException('Failed to exchange code for tokens', HttpStatus.BAD_REQUEST);
+    }
+  }
+
+  async getTokenInfo(token: string) {
+    try {
+      const response = await axios.get(`https://${process.env.AUTH0_DOMAIN}/oauth/token/info`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async verifySession(token: string): Promise<boolean> {
+    try {
+      await axios.get(`https://${process.env.AUTH0_DOMAIN}/userinfo`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return true;
+    } catch (error) {
+      return false;
     }
   }
 
@@ -82,14 +112,40 @@ export class AuthService {
     }
   }
 
-  async generateJWT(user: any) {
-    const payload = { 
+  async generateJWT(user: any, tokens: any) {
+    const oneDayInSeconds = 86400; // 1 day
+    const auth0ExpiresIn = tokens.expires_in || oneDayInSeconds;
+
+    const payload: TokenPayload = {
       sub: user.id,
       email: user.email,
-      username: user.username
+      username: user.username,
+      auth0Token: tokens.access_token,
+      auth0Expiry: Math.floor(Date.now() / 1000) + auth0ExpiresIn
     };
     
-    return this.jwtService.sign(payload);
+    return this.jwtService.sign(payload, {
+      expiresIn: auth0ExpiresIn
+    });
+  }
+
+  async refreshToken(currentToken: string): Promise<string | null> {
+    try {
+      const decoded = this.jwtService.verify(currentToken);
+      const isAuth0Valid = await this.verifySession(decoded.auth0Token);
+      
+      if (!isAuth0Valid) {
+        return null;
+      }
+
+      const user = await this.prisma.user.findUnique({
+        where: { id: decoded.sub }
+      });
+
+      return this.generateJWT(user, decoded.auth0Token);
+    } catch {
+      return null;
+    }
   }
 
   async validateUser(payload: any) {

@@ -13,6 +13,10 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum TokenType {
+  STATE
+}
+
 model User {
   id        String   @id @default(uuid())
   auth0Id   String   @unique
@@ -25,6 +29,18 @@ model User {
   mnemonicShare MnemonicShare?
   mnemonicShareTransaction MnemonicShareTransaction?  // Share3's transaction hash stored on server
   challenge     Challenge[]
+}
+
+model AuthToken {
+  id        String   @id @default(uuid())  // state parameter
+  token     String   // JWT or temp token
+  type      TokenType @default(STATE)
+  status    String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  used      Boolean  @default(false)
+
+  @@index([expiresAt])
 }
 
 model Challenge {

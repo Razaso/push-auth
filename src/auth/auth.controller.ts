@@ -1,15 +1,18 @@
-import { Controller, Get, UseGuards, Req, Res, Logger, Query } from '@nestjs/common';
+import { Controller, Get, UseGuards, Req, Res, Logger, Query, Post, Headers, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { v4 as uuidv4 } from 'uuid';
+import { TokenService } from './token.service';
 
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
-  private tempTokenStore: Map<string, string> = new Map();
 
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly tokenService: TokenService
+  ) {}
 
   @Get('login')
   @UseGuards(AuthGuard('auth0'))
@@ -22,15 +25,15 @@ export class AuthController {
     @Query('email') email: string,
     @Res() res: Response
   ) {
-    const state = uuidv4();
-    this.tempTokenStore.set(state, 'pending');
+
+    const authToken = await this.tokenService.createToken('pending');
     
     const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
       `response_type=code&` +
       `client_id=${process.env.AUTH0_CLIENT_ID}&` +
       `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
       `scope=openid profile email&` +
-      `state=${state}&` +
+      `state=${authToken.id}&` +
       `connection=email&` +
       `login_hint=${encodeURIComponent(email)}`;
 
@@ -42,9 +45,9 @@ export class AuthController {
     @Query('provider') provider: 'github' | 'google' | 'discord' | 'twitter',
     @Res() res: Response
   ) {
-    const state = uuidv4();
-    this.tempTokenStore.set(state, 'pending');
-    
+
+    const authToken = await this.tokenService.createToken('pending')
+
     // Map provider to correct connection name
     const connectionMap = {
       google: 'google-oauth2',
@@ -58,7 +61,7 @@ export class AuthController {
       `client_id=${process.env.AUTH0_CLIENT_ID}&` +
       `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
       `scope=openid profile email&` +
-      `state=${state}&` +
+      `state=${authToken.id}&` +
       `connection=${connectionMap[provider]}`;
 
     res.redirect(auth0Url);
@@ -69,15 +72,14 @@ export class AuthController {
     @Query('phone') phone: string,
     @Res() res: Response
   ) {
-    const state = uuidv4();
-    this.tempTokenStore.set(state, 'pending');
-    
+    const authToken = await this.tokenService.createToken('pending')
+
     const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
       `response_type=code&` +
       `client_id=${process.env.AUTH0_CLIENT_ID}&` +
       `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
       `scope=openid profile email&` +
-      `state=${state}&` +
+      `state=${authToken.id}&` +
       `connection=sms&` +
       `login_hint=${encodeURIComponent(phone)}`;
 
@@ -85,34 +87,29 @@ export class AuthController {
   }
   
   @Get('callback')
-  async callback(@Query('code') code: string, @Res() res: Response) {
+  async callback(@Query('code') code: string, @Query('state') state: string, @Res() res: Response) {
     try {
 
-      console.log('code', code)
+      const storedToken = await this.tokenService.retrieveToken(state);
+      if (!storedToken || storedToken.status !== 'pending') {
+        throw new UnauthorizedException('Invalid state parameter');
+      }
+
       // Exchange the code for tokens
       const tokens = await this.authService.exchangeCodeForTokens(code);
       
-      console.log('tokens', tokens)
-
       // Get user profile using the access token
       const profile = await this.authService.getUserProfile(tokens.access_token);
       
-      console.log('profile', profile)
-
       // Create or update user in our database
       const user = await this.authService.findOrCreateUser(profile);
       
-      console.log('user', user)
-
       // Generate our own JWT
-      const jwt = await this.authService.generateJWT(user);
+      const jwt = await this.authService.generateJWT(user, tokens);
 
-      // Generate new state for frontend token retrieval
-      const newState = uuidv4();
-      this.tempTokenStore.set(newState, jwt);
 
-      // Redirect back to frontend with state
-      res.redirect(`${process.env.FRONTEND_URL}/push-keys/#/profile?state=${newState}`);
+      await this.tokenService.updateToken(state, jwt);
+      res.redirect(`${process.env.FRONTEND_URL}/push-keys/#/profile?state=${state}`);
     } catch (error) {
       this.logger.error('Auth callback error:', error);
       res.redirect(`${process.env.FRONTEND_URL}/login?error=authentication_failed`);
@@ -120,23 +117,38 @@ export class AuthController {
   }
 
   @Get('jwt')
-  async getJwt(@Req() req: Request, @Res() res: Response) {
-    const { state } = req.query;
+  async getJwt(@Query('state') state: string) {
+    console.log('getJwt state', state);
 
-    if (!state || typeof state !== 'string') {
-      return res.status(400).json({ error: 'Invalid state parameter' });
+    if (!state) {
+      throw new BadRequestException('Invalid state parameter');
     }
 
-    const token = this.tempTokenStore.get(state);
+    const storedToken = await this.tokenService.retrieveToken(state);
 
-    if (!token) {
-      return res.status(401).json({ error: 'Unauthorized or expired state parameter' });
+    if (!storedToken || !storedToken.token) {
+      throw new UnauthorizedException('Unauthorized or expired state parameter');
     }
 
-    // Remove the token from the temporary store to prevent reuse
-    this.tempTokenStore.delete(state);
+    // Mark the token as used and return it
+    const updatedToken = await this.tokenService.markAsUsed(state);
+    return { token: updatedToken.token };
+  }
 
-    return res.json({ token });
+  @Post('refresh')
+  async refreshToken(@Headers('authorization') auth: string) {
+    if (!auth) {
+      throw new UnauthorizedException('No token provided');
+    }
+
+    const token = auth.split(' ')[1];
+    const newToken = await this.authService.refreshToken(token);
+    
+    if (!newToken) {
+      throw new UnauthorizedException('Invalid or expired token');
+    }
+
+    return { token: newToken };
   }
 
   @Get('user')
