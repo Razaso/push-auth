@@ -30,6 +30,7 @@ export class AuthModule {
     consumer
       .apply(AuthMiddleware)
       .exclude(
+        { path: '/health', method: RequestMethod.GET },
         { path: 'auth/callback', method: RequestMethod.GET },
         { path: 'auth/refresh', method: RequestMethod.POST },
         { path: 'auth/jwt', method: RequestMethod.GET },
