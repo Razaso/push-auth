@@ -1,0 +1,36 @@
+steps:
+# Step 1: Build the Docker Image and push to Artifact Registry
+- name: 'gcr.io/cloud-builders/docker'
+  entrypoint: 'bash'
+  args:
+    - '-c'
+    - | 
+      #!/bin/bash
+      docker build -t us-central1-docker.pkg.dev/push-dev-apps/ar-d-services-base-usce1/push-auth-node-image:$SHORT_SHA .
+      docker push us-central1-docker.pkg.dev/push-dev-apps/ar-d-services-base-usce1/push-auth-node-image:$SHORT_SHA
+
+# Step 2: Create the Deployment
+- name: 'gcr.io/cloud-builders/gcloud'
+  entrypoint: 'bash'
+  args:
+    - '-c'
+    - | 
+      #!/bin/bash
+      gcloud container clusters get-credentials gke-d-services-base-usce1 --region us-central1 --project push-dev-apps
+      export DEP_EXIST=$(kubectl get deployment -n apps | grep push-auth-node)
+      if [[ -z "$${DEP_EXIST// /}" ]]
+      then
+        echo "Creating Deployment..."
+        gcloud artifacts docker tags add us-central1-docker.pkg.dev/push-dev-apps/ar-d-services-base-usce1/push-auth-node-image:$SHORT_SHA us-central1-docker.pkg.dev/push-dev-apps/ar-d-services-base-usce1/push-auth-node-image:init
+        kubectl apply -f ./pipelines/dev-pipeline/k8s/deployment.yaml
+        echo "Created Deployment."
+      else
+        echo "Updating Deployment..."
+        sed -i "s|image: 'us-central1-docker.pkg.dev/push-dev-apps/ar-d-services-base-usce1/push-auth-node-image:init'|image: 'us-central1-docker.pkg.dev/push-dev-apps/ar-d-services-base-usce1/push-auth-node-image:$SHORT_SHA'|g" ./pipelines/dev-pipeline/k8s/deployment.yaml
+        kubectl apply -f ./pipelines/dev-pipeline/k8s/deployment.yaml
+        echo "Updated Deployment..."
+      fi
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  workerPool: 'projects/push-dev-apps/locations/us-central1/workerPools/worker-pool-d-services-base-usce1'
