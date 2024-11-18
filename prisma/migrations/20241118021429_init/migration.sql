@@ -1,3 +1,6 @@
+-- CreateEnum
+CREATE TYPE "TokenType" AS ENUM ('STATE');
+
 -- CreateTable
 CREATE TABLE "User" (
     "id" TEXT NOT NULL,
@@ -10,6 +13,19 @@ CREATE TABLE "User" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "AuthToken" (
+    "id" TEXT NOT NULL,
+    "token" TEXT NOT NULL,
+    "type" "TokenType" NOT NULL DEFAULT 'STATE',
+    "status" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "used" BOOLEAN NOT NULL DEFAULT false,
+
+    CONSTRAINT "AuthToken_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -28,6 +44,7 @@ CREATE TABLE "MnemonicShare" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "share" TEXT NOT NULL,
+    "active" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -43,6 +60,7 @@ CREATE TABLE "MnemonicShareTransaction" (
     "credentialId" TEXT NOT NULL,
     "transactionHash" TEXT NOT NULL,
     "iv" TEXT NOT NULL,
+    "active" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -53,19 +71,22 @@ CREATE TABLE "MnemonicShareTransaction" (
 CREATE UNIQUE INDEX "User_auth0Id_key" ON "User"("auth0Id");
 
 -- CreateIndex
-CREATE INDEX "Challenge_userId_idx" ON "Challenge"("userId");
+CREATE INDEX "AuthToken_expiresAt_idx" ON "AuthToken"("expiresAt");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "MnemonicShare_userId_key" ON "MnemonicShare"("userId");
+CREATE INDEX "Challenge_userId_idx" ON "Challenge"("userId");
 
 -- CreateIndex
 CREATE INDEX "MnemonicShare_userId_idx" ON "MnemonicShare"("userId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "MnemonicShareTransaction_userId_key" ON "MnemonicShareTransaction"("userId");
+CREATE INDEX "MnemonicShare_userId_active_idx" ON "MnemonicShare"("userId", "active");
 
 -- CreateIndex
 CREATE INDEX "MnemonicShareTransaction_userId_idx" ON "MnemonicShareTransaction"("userId");
+
+-- CreateIndex
+CREATE INDEX "MnemonicShareTransaction_userId_active_idx" ON "MnemonicShareTransaction"("userId", "active");
 
 -- AddForeignKey
 ALTER TABLE "Challenge" ADD CONSTRAINT "Challenge_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

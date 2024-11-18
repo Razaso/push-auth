@@ -8,6 +8,8 @@ import { Auth0Strategy } from './strategies/auth0.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthMiddleware } from './auth.middleware';
+import { WinstonModule } from 'nest-winston';
+import { loggerConfig } from '../logger/config';
 
 @Module({
   imports: [
@@ -16,6 +18,7 @@ import { AuthMiddleware } from './auth.middleware';
     JwtModule.register({
       secret: process.env.JWT_SECRET
     }),
+    WinstonModule.forRoot(loggerConfig),
   ],
   controllers: [AuthController],
   providers: [AuthService, TokenService,Auth0Strategy, JwtStrategy],

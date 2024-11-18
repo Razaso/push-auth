@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { 
   generateRegistrationOptions,
@@ -7,16 +7,38 @@ import {
   verifyAuthenticationResponse 
 } from '@simplewebauthn/server';
 import base64url from 'base64url';
+import { WINSTON_MODULE_PROVIDER } from 'nest-winston';
+import { Logger } from 'winston';
+
+interface ChallengeMetadata {
+  rpId: string;
+  origin: string;
+  timestamp: string;
+  authenticationType?: string;
+  verifiedAt?: string;
+  credentialId?: string;
+  newCounter?: number;
+  error?: string;
+  failedAt?: string;
+}
 
 @Injectable()
 export class PasskeyService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    @Inject(WINSTON_MODULE_PROVIDER) private readonly logger: Logger,
+    private prisma: PrismaService
+  ) {}
 
   private readonly rpName = 'Push Protocol';
   private readonly rpID = 'localhost';
   private readonly origin = 'http://localhost:5173';
 
   async generateRegistrationOptions(userId: string) {
+    this.logger.info('Generating registration options', { 
+      userId,
+      context: 'PasskeyService.generateRegistrationOptions'
+    });
+
     const options = await generateRegistrationOptions({
       rpName: this.rpName,
       rpID: this.rpID,
@@ -30,18 +52,38 @@ export class PasskeyService {
       }
     });
 
-    // Convert challenge to base64URL before storing
     const challengeBase64URL = Buffer.from(options.challenge)
       .toString('base64')
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=/g, '');
 
+    // Mark any existing active challenges as used
+    await this.prisma.challenge.updateMany({
+      where: { 
+        userId,
+        active: true,
+        used: false
+      },
+      data: { 
+        active: false,
+        used: true,
+        usedAt: new Date()
+      }
+    });
+
+    // Create new challenge
     await this.prisma.challenge.create({
       data: {
         userId,
         challenge: challengeBase64URL,
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        type: 'REGISTRATION',
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
+        metadata: {
+          rpId: this.rpID,
+          origin: this.origin,
+          timestamp: new Date().toISOString()
+        }
       }
     });
 
@@ -49,51 +91,138 @@ export class PasskeyService {
   }
 
   async verifyRegistration(userId: string, credential: any) {
+    this.logger.info('Verifying registration', { 
+      userId,
+      context: 'PasskeyService.verifyRegistration'
+    });
+    
     const challenge = await this.prisma.challenge.findFirst({
-      where: { userId },
+      where: { 
+        userId,
+        active: true,
+        used: false,
+        expiresAt: { gt: new Date() }
+      },
       orderBy: { createdAt: 'desc' }
     });
 
     if (!challenge) {
-      throw new Error('Challenge not found');
+      throw new Error('Challenge not found or expired');
     }
 
-    const verification = await verifyRegistrationResponse({
-      response: credential,
-      expectedChallenge: challenge.challenge,
-      expectedOrigin: this.origin,
-      expectedRPID: this.rpID,
-    });
+    try {
+      const verification = await verifyRegistrationResponse({
+        response: credential,
+        expectedChallenge: challenge.challenge,
+        expectedOrigin: this.origin,
+        expectedRPID: this.rpID,
+      });
 
-    if (verification.verified) {
-      await this.prisma.mnemonicShareTransaction.create({
-        data: {
-          credentialId: credential.id,
-          publicKey: Buffer.from(verification.registrationInfo?.credentialPublicKey).toString('base64'),
-          counter: verification.registrationInfo?.counter,
-          transactionHash: '',
-          iv: '',
-          user: {
-            connect: {
-              id: userId
+      if (verification.verified) {
+        // Use transaction to ensure atomicity
+        await this.prisma.$transaction(async (tx) => {
+          // Mark challenge as used
+          await tx.challenge.update({
+            where: { id: challenge.id },
+            data: { 
+              used: true,
+              active: false,
+              usedAt: new Date(),
+              verificationSuccess: true,
+              metadata: {
+                ...((challenge.metadata as unknown) as ChallengeMetadata),
+                verifiedAt: new Date().toISOString(),
+                credentialId: credential.id
+              }
             }
+          });
+
+          // Deactivate any existing transactions
+          await tx.mnemonicShareTransaction.updateMany({
+            where: { 
+              userId,
+              active: true 
+            },
+            data: { 
+              active: false 
+            }
+          });
+
+          // Create new active transaction
+          await tx.mnemonicShareTransaction.create({
+            data: {
+              credentialId: credential.id,
+              publicKey: Buffer.from(verification.registrationInfo?.credentialPublicKey).toString('base64'),
+              counter: verification.registrationInfo?.counter || 0,
+              transactionHash: '',
+              iv: '',
+              active: true,
+              user: {
+                connect: {
+                  id: userId
+                }
+              }
+            }
+          });
+        });
+
+        this.logger.info('Registration verified successfully', { 
+          userId,
+          context: 'PasskeyService.verifyRegistration'
+        });
+      }
+
+      return verification;
+    } catch (error) {
+      // Mark challenge as failed
+      await this.prisma.challenge.update({
+        where: { id: challenge.id },
+        data: { 
+          used: true,
+          active: false,
+          usedAt: new Date(),
+          verificationSuccess: false,
+          metadata: {
+            ...((challenge.metadata as unknown) as ChallengeMetadata),
+            error: error.message,
+            failedAt: new Date().toISOString()
           }
         }
       });
-    }
 
-    return verification;
+      this.logger.error('Registration verification failed', { 
+        userId,
+        error: error.message,
+        stack: error.stack,
+        context: 'PasskeyService.verifyRegistration'
+      });
+      throw error;
+    }
   }
 
   async generateAuthenticationChallenge(userId: string) {
+    this.logger.debug('Generating authentication challenge', { 
+      userId,
+      context: 'PasskeyService.generateAuthenticationChallenge'
+    });
+
     const options = await generateAuthenticationOptions({
       rpID: this.rpID,
       userVerification: 'required',
     });
 
-    // First, delete any existing challenges for this user
-    await this.prisma.challenge.deleteMany({
-      where: { userId }
+    // Mark any existing active challenges as used
+    await this.prisma.challenge.updateMany({
+      where: { 
+        userId,
+        active: true,
+        used: false
+      },
+      data: { 
+        active: false,
+        used: true,
+        usedAt: new Date()
+      }
     });
 
     // Convert challenge to base64URL before storing
@@ -103,25 +232,36 @@ export class PasskeyService {
       .replace(/\//g, '_')
       .replace(/=/g, '');
 
-    // Then create the new challenge
+    // Create new challenge
     await this.prisma.challenge.create({
       data: {
         userId,
         challenge: challengeBase64URL,
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        type: 'AUTHENTICATION',
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
+        metadata: {
+          rpId: this.rpID,
+          origin: this.origin,
+          timestamp: new Date().toISOString(),
+          authenticationType: 'platform'
+        }
       }
     });
 
     return options;
   }
 
-  
   async verifyAuthentication(userId: string, credential: any) {
-    // Restructure the credential to match expected format
+    this.logger.debug('Starting authentication verification', { 
+      userId,
+      credentialId: credential.id,
+      context: 'PasskeyService.verifyAuthentication'
+    });
+
     const formattedCredential = {
       id: credential.id,
       rawId: credential.rawId,
-      type: 'public-key' as const, // Add 'as const' to make it a literal type
+      type: 'public-key' as const,
       response: {
         authenticatorData: credential.authenticatorData,
         clientDataJSON: credential.clientDataJSON,
@@ -130,29 +270,62 @@ export class PasskeyService {
       clientExtensionResults: {}
     };
   
+    // Find active, unused, non-expired challenge
     const expectedChallenge = await this.prisma.challenge.findFirst({
-      where: { userId },
+      where: { 
+        userId,
+        active: true,
+        used: false,
+        type: 'AUTHENTICATION',
+        expiresAt: { gt: new Date() }
+      },
       orderBy: { createdAt: 'desc' }
     });
   
     if (!expectedChallenge) {
+      this.logger.error('Valid challenge not found or expired', { 
+        userId,
+        context: 'PasskeyService.verifyAuthentication'
+      });
       throw new Error('Challenge not found or expired');
     }
   
+    // Find active authenticator
     const authenticator = await this.prisma.mnemonicShareTransaction.findFirst({
       where: { 
         credentialId: credential.id,
-        userId: userId
+        userId,
+        active: true
       }
     });
   
     if (!authenticator) {
+      this.logger.error('Active authenticator not found', { 
+        userId,
+        credentialId: credential.id,
+        context: 'PasskeyService.verifyAuthentication'
+      });
+
+      // Mark challenge as failed
+      await this.prisma.challenge.update({
+        where: { id: expectedChallenge.id },
+        data: { 
+          used: true,
+          active: false,
+          usedAt: new Date(),
+          verificationSuccess: false,
+          metadata: {
+            ...((expectedChallenge.metadata as unknown) as ChallengeMetadata),
+            error: 'Authenticator not found',
+            failedAt: new Date().toISOString()
+          }
+        }
+      });
+
       throw new Error('Authenticator not found');
     }
     
-    // Decode the base64URL challenge back to original format
     const decodedChallenge = base64url.decode(expectedChallenge.challenge);
-  
 
     try {
       const verification = await verifyAuthenticationResponse({
@@ -168,15 +341,40 @@ export class PasskeyService {
       });
   
       if (verification.verified) {
-        await this.prisma.mnemonicShareTransaction.update({
-          where: { 
-            userId: authenticator.userId,
-            credentialId: credential.id
-          },
-          data: { 
-            counter: verification.authenticationInfo.newCounter,
-            updatedAt: new Date()
-          }
+        // Use transaction to ensure atomicity
+        await this.prisma.$transaction(async (tx) => {
+          // Mark challenge as used and successful
+          await tx.challenge.update({
+            where: { id: expectedChallenge.id },
+            data: { 
+              used: true,
+              active: false,
+              usedAt: new Date(),
+              verificationSuccess: true,
+              metadata: {
+                ...((expectedChallenge.metadata as unknown) as ChallengeMetadata),
+                verifiedAt: new Date().toISOString(),
+                credentialId: credential.id,
+                newCounter: verification.authenticationInfo.newCounter
+              }
+            }
+          });
+
+          // Update authenticator counter
+          await tx.mnemonicShareTransaction.update({
+            where: { 
+              id: authenticator.id
+            },
+            data: { 
+              counter: verification.authenticationInfo.newCounter,
+              updatedAt: new Date()
+            }
+          });
+        });
+
+        this.logger.info('Authentication verified successfully', { 
+          userId,
+          context: 'PasskeyService.verifyAuthentication'
         });
   
         return { 
@@ -185,20 +383,61 @@ export class PasskeyService {
         };
       }
   
+      // Mark challenge as failed for unsuccessful verification
+      await this.prisma.challenge.update({
+        where: { id: expectedChallenge.id },
+        data: { 
+          used: true,
+          active: false,
+          usedAt: new Date(),
+          verificationSuccess: false,
+          metadata: {
+            ...((expectedChallenge.metadata as unknown) as ChallengeMetadata),
+            error: 'Verification failed',
+            failedAt: new Date().toISOString()
+          }
+        }
+      });
+
       return { verified: false };
     } catch (error) {
-      console.error('Authentication verification failed:', error);
-      throw new Error('Authentication verification failed');
+      // Mark challenge as failed with error
+      await this.prisma.challenge.update({
+        where: { id: expectedChallenge.id },
+        data: { 
+          used: true,
+          active: false,
+          usedAt: new Date(),
+          verificationSuccess: false,
+          metadata: {
+            ...((expectedChallenge.metadata as unknown) as ChallengeMetadata),
+            error: error.message,
+            failedAt: new Date().toISOString()
+          }
+        }
+      });
+
+      this.logger.error('Authentication verification failed', { 
+        userId,
+        error: error.message,
+        stack: error.stack,
+        context: 'PasskeyService.verifyAuthentication'
+      });
+      throw error;
     }
   }
 
-  async storeTransactionHash(
-    userId: string,
-    transactionHash: string,
-    iv: string
-  ) {
-    return this.prisma.mnemonicShareTransaction.update({
-      where: { userId },
+  async storeTransactionHash(userId: string, transactionHash: string, iv: string) {
+    this.logger.debug('Storing transaction hash', { 
+      userId,
+      context: 'PasskeyService.storeTransactionHash'
+    });
+
+    return this.prisma.mnemonicShareTransaction.updateMany({
+      where: { 
+        userId,
+        active: true 
+      },
       data: {
         transactionHash,
         iv
@@ -207,8 +446,16 @@ export class PasskeyService {
   }
 
   async getTransactionHash(userId: string) {
-    const transaction = await this.prisma.mnemonicShareTransaction.findUnique({
-      where: { userId },
+    this.logger.debug('Retrieving transaction hash', { 
+      userId,
+      context: 'PasskeyService.getTransactionHash'
+    });
+
+    const transaction = await this.prisma.mnemonicShareTransaction.findFirst({
+      where: { 
+        userId,
+        active: true 
+      },
       select: {
         transactionHash: true,
         iv: true
@@ -216,6 +463,10 @@ export class PasskeyService {
     });
 
     if (!transaction) {
+      this.logger.error('Active transaction not found', { 
+        userId,
+        context: 'PasskeyService.getTransactionHash'
+      });
       throw new Error('Transaction not found');
     }
 

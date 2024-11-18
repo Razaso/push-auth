@@ -1,15 +1,16 @@
-import { Controller, Get, UseGuards, Req, Res, Logger, Query, Post, Headers, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Inject, Controller, Get, UseGuards, Req, Res, Query, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { AuthService } from './auth.service';
-import { v4 as uuidv4 } from 'uuid';
 import { TokenService } from './token.service';
+import { Logger } from 'winston';
+import { WINSTON_MODULE_PROVIDER } from 'nest-winston';
 
 @Controller('auth')
 export class AuthController {
-  private readonly logger = new Logger(AuthController.name);
 
   constructor(
+    @Inject(WINSTON_MODULE_PROVIDER) private readonly logger: Logger,
     private readonly authService: AuthService,
     private readonly tokenService: TokenService
   ) {}
@@ -17,6 +18,7 @@ export class AuthController {
   @Get('login')
   @UseGuards(AuthGuard('auth0'))
   async login() {
+    this.logger.debug('Initiating Auth0 login');
     // Auth0 will handle the login
   }
 
@@ -25,19 +27,27 @@ export class AuthController {
     @Query('email') email: string,
     @Res() res: Response
   ) {
+    this.logger.debug('Processing email authorization request', { email });
 
-    const authToken = await this.tokenService.createToken('pending');
+    try {
+      const authToken = await this.tokenService.createToken('pending');
+      this.logger.debug('Created pending auth token', { tokenId: authToken.id });
     
-    const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
-      `response_type=code&` +
-      `client_id=${process.env.AUTH0_CLIENT_ID}&` +
-      `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
-      `scope=openid profile email&` +
-      `state=${authToken.id}&` +
-      `connection=email&` +
-      `login_hint=${encodeURIComponent(email)}`;
+      const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
+        `response_type=code&` +
+        `client_id=${process.env.AUTH0_CLIENT_ID}&` +
+        `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
+        `scope=openid profile email&` +
+        `state=${authToken.id}&` +
+        `connection=email&` +
+        `login_hint=${encodeURIComponent(email)}`;
 
-    res.redirect(auth0Url);
+      this.logger.info('Redirecting to Auth0 email authorization');
+      res.redirect(auth0Url);
+    } catch (error) {
+      this.logger.error('Email authorization failed', { error: error.message, email });
+      throw error;
+    }
   }
 
   @Get('authorize-social')
@@ -45,125 +55,109 @@ export class AuthController {
     @Query('provider') provider: 'github' | 'google' | 'discord' | 'twitter',
     @Res() res: Response
   ) {
+    this.logger.debug('Processing social authorization request', { provider });
 
-    const authToken = await this.tokenService.createToken('pending')
+    try {
+      const authToken = await this.tokenService.createToken('pending');
+      this.logger.debug('Created pending auth token', { tokenId: authToken.id });
 
-    // Map provider to correct connection name
-    const connectionMap = {
-      google: 'google-oauth2',
-      github: 'github',
-      discord: 'discord',
-      twitter: 'twitter'
-    };
+      const connectionMap = {
+        google: 'google-oauth2',
+        github: 'github',
+        discord: 'discord',
+        twitter: 'twitter'
+      };
 
-    const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
-      `response_type=code&` +
-      `client_id=${process.env.AUTH0_CLIENT_ID}&` +
-      `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
-      `scope=openid profile email&` +
-      `state=${authToken.id}&` +
-      `connection=${connectionMap[provider]}`;
+      const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
+        `response_type=code&` +
+        `client_id=${process.env.AUTH0_CLIENT_ID}&` +
+        `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
+        `scope=openid profile email&` +
+        `state=${authToken.id}&` +
+        `connection=${connectionMap[provider]}`;
 
-    res.redirect(auth0Url);
-  }
-
-  @Get('authorize-phone')
-  async authorizePhone(
-    @Query('phone') phone: string,
-    @Res() res: Response
-  ) {
-    const authToken = await this.tokenService.createToken('pending')
-
-    const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
-      `response_type=code&` +
-      `client_id=${process.env.AUTH0_CLIENT_ID}&` +
-      `redirect_uri=${process.env.BACKEND_URL}/auth/callback&` +
-      `scope=openid profile email&` +
-      `state=${authToken.id}&` +
-      `connection=sms&` +
-      `login_hint=${encodeURIComponent(phone)}`;
-
-    res.redirect(auth0Url);
+      this.logger.info('Redirecting to Auth0 social authorization', { provider });
+      res.redirect(auth0Url);
+    } catch (error) {
+      this.logger.error('Social authorization failed', { error: error.message, provider });
+      throw error;
+    }
   }
   
   @Get('callback')
   async callback(@Query('code') code: string, @Query('state') state: string, @Res() res: Response) {
-    try {
+    this.logger.info('Processing Auth0 callback', { state });
 
+    try {
       const storedToken = await this.tokenService.retrieveToken(state);
       if (!storedToken || storedToken.status !== 'pending') {
+        this.logger.warn('Invalid state parameter in callback', { state });
         throw new UnauthorizedException('Invalid state parameter');
       }
 
-      // Exchange the code for tokens
+      this.logger.debug('Exchanging code for tokens');
       const tokens = await this.authService.exchangeCodeForTokens(code);
       
-      // Get user profile using the access token
+      this.logger.debug('Fetching user profile');
       const profile = await this.authService.getUserProfile(tokens.access_token);
       
-      // Create or update user in our database
+      this.logger.debug('Creating or updating user', { auth0Id: profile.sub });
       const user = await this.authService.findOrCreateUser(profile);
       
-      // Generate our own JWT
+      this.logger.debug('Generating JWT', { userId: user.id });
       const jwt = await this.authService.generateJWT(user, tokens);
 
-
       await this.tokenService.updateToken(state, jwt);
+      this.logger.info('Authentication successful, redirecting to profile', { userId: user.id });
       res.redirect(`${process.env.FRONTEND_URL}/push-keys/#/profile?state=${state}`);
     } catch (error) {
-      this.logger.error('Auth callback error:', error);
+      this.logger.error('Auth callback error:', { 
+        error: error.message, 
+        stack: error.stack,
+        state 
+      });
       res.redirect(`${process.env.FRONTEND_URL}/login?error=authentication_failed`);
     }
   }
 
   @Get('jwt')
   async getJwt(@Query('state') state: string) {
-    console.log('getJwt state', state);
+    this.logger.info('Processing GetJWT request', { state });
 
     if (!state) {
+      this.logger.warn('Missing state parameter in JWT request');
       throw new BadRequestException('Invalid state parameter');
     }
 
     const storedToken = await this.tokenService.retrieveToken(state);
 
     if (!storedToken || !storedToken.token) {
+      this.logger.warn('Invalid or expired token in JWT request', { state });
       throw new UnauthorizedException('Unauthorized or expired state parameter');
     }
 
-    // Mark the token as used and return it
-    const updatedToken = await this.tokenService.markAsUsed(state);
-    return { token: updatedToken.token };
-  }
-
-  @Post('refresh')
-  async refreshToken(@Headers('authorization') auth: string) {
-    if (!auth) {
-      throw new UnauthorizedException('No token provided');
-    }
-
-    const token = auth.split(' ')[1];
-    const newToken = await this.authService.refreshToken(token);
-    
-    if (!newToken) {
-      throw new UnauthorizedException('Invalid or expired token');
-    }
-
-    return { token: newToken };
+    this.logger.debug('Marking token as used', { state });
+    await this.tokenService.markAsUsed(state);
+    return { token: storedToken.token };
   }
 
   @Get('user')
   @UseGuards(AuthGuard('jwt'))
   async getUser(@Req() req: any) {
+    this.logger.debug('Fetching user information', { userId: req.user?.sub });
     return req.user;
   }
 
   @Get('logout')
   async logout(@Res() res: Response) {
+    this.logger.debug('Processing logout request');
     const returnTo = encodeURIComponent(process.env.FRONTEND_URL);
-    res.redirect(
-      `https://${process.env.AUTH0_DOMAIN}/v2/logout?` +
+    
+    const logoutUrl = `https://${process.env.AUTH0_DOMAIN}/v2/logout?` +
       `client_id=${process.env.AUTH0_CLIENT_ID}&` +
-      `returnTo=${returnTo}`
-    );
+      `returnTo=${returnTo}`;
+      
+    this.logger.debug('Redirecting to Auth0 logout');
+    res.redirect(logoutUrl);
   }
 }
