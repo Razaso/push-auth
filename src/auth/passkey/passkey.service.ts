@@ -30,8 +30,8 @@ export class PasskeyService {
   ) {}
 
   private readonly rpName = 'Push Protocol';
-  private readonly rpID = 'localhost';
-  private readonly origin = 'http://localhost:5173';
+  private readonly rpID = process.env.RP_ID;
+  private readonly origin =  process.env.FRONTEND_URL;
 
   async generateRegistrationOptions(userId: string) {
     this.logger.info('Generating registration options', { 
