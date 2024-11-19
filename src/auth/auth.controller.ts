@@ -53,12 +53,13 @@ export class AuthController {
   @Get('authorize-social')
   async authorizeSocial(
     @Query('provider') provider: 'github' | 'google' | 'discord' | 'twitter',
+    @Query('redirectUri') redirectUri: string,
     @Res() res: Response
   ) {
-    this.logger.debug('Processing social authorization request', { provider });
+    this.logger.debug('Processing social authorization request', { provider, redirectUri });
 
     try {
-      const authToken = await this.tokenService.createToken('pending');
+      const authToken = await this.tokenService.createToken('pending', { redirectUri });
       this.logger.debug('Created pending auth token', { tokenId: authToken.id });
 
       const connectionMap = {
@@ -79,7 +80,7 @@ export class AuthController {
       this.logger.info('Redirecting to Auth0 social authorization', { provider });
       res.redirect(auth0Url);
     } catch (error) {
-      this.logger.error('Social authorization failed', { error: error.message, provider });
+      this.logger.error('Social authorization failed', { error: error.message, provider, redirectUri });
       throw error;
     }
   }
@@ -108,15 +109,23 @@ export class AuthController {
       const jwt = await this.authService.generateJWT(user, tokens);
 
       await this.tokenService.updateToken(state, jwt);
+      const redirectUri = storedToken.redirectUri
+
       this.logger.info('Authentication successful, redirecting to profile', { userId: user.id });
-      res.redirect(`${process.env.FRONTEND_URL}/profile?state=${state}`);
+      res.redirect(`${redirectUri}?state=${state}`);
+
     } catch (error) {
       this.logger.error('Auth callback error:', { 
         error: error.message, 
         stack: error.stack,
         state 
       });
-      res.redirect(`${process.env.FRONTEND_URL}/login?error=authentication_failed`);
+      
+      res.status(401).json({
+        error: 'authentication_failed',
+        message: error.message,
+        state
+      });
     }
   }
 

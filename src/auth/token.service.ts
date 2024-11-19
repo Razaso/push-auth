@@ -13,7 +13,7 @@ export class TokenService {
     private readonly prisma: PrismaService
   ) {}
 
-  async createToken(status: string): Promise<AuthToken> {
+  async createToken(status: string, metadata?: { redirectUri?: string }): Promise<AuthToken> {
     this.logger.debug('Creating new auth token', { status });
     
     try {
@@ -22,6 +22,7 @@ export class TokenService {
           status,
           token: '',
           expiresAt: new Date(Date.now() + this.FIVE_MINUTES),
+          redirectUri: metadata?.redirectUri,
         },
       });
       this.logger.debug('Auth token created successfully', { tokenId: token.id });

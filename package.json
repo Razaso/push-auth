@@ -8,7 +8,8 @@
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "prisma:migrate": "npx prisma migrate dev --name init",
+    "prisma:migrate": "npx prisma migrate dev",
+    "prisma:migrate:name": "npx prisma migrate dev --name",
     "prisma:generate": "npx prisma generate",
     "prisma:deploy": "npx prisma migrate deploy",
     "start": "npx prisma generate && npx prisma migrate deploy && ts-node src/main.ts",
