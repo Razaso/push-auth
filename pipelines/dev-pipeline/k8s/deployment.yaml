@@ -63,6 +63,11 @@ spec:
                 configMapKeyRef:
                   name: auth-node-apps-configmap
                   key: RP_ID
+            - name: FRONTEND_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-node-apps-configmap
+                  key: FRONTEND_URL
             - name: BACKEND_URL
               valueFrom:
                 configMapKeyRef:
