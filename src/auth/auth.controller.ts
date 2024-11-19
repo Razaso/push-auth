@@ -109,7 +109,7 @@ export class AuthController {
 
       await this.tokenService.updateToken(state, jwt);
       this.logger.info('Authentication successful, redirecting to profile', { userId: user.id });
-      res.redirect(`${process.env.FRONTEND_URL}/push-keys/#/profile?state=${state}`);
+      res.redirect(`${process.env.FRONTEND_URL}/profile?state=${state}`);
     } catch (error) {
       this.logger.error('Auth callback error:', { 
         error: error.message, 
