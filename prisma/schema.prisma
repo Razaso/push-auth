@@ -36,6 +36,7 @@ model AuthToken {
   token     String   // JWT or temp token
   type      TokenType @default(STATE)
   status    String
+  redirectUri String?
   createdAt DateTime @default(now())
   expiresAt DateTime
   used      Boolean  @default(false)
