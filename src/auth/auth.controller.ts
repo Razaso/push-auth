@@ -109,7 +109,7 @@ export class AuthController {
       const jwt = await this.authService.generateJWT(user, tokens);
 
       await this.tokenService.updateToken(state, jwt);
-      const redirectUri = storedToken.redirectUri
+      const redirectUri = storedToken.redirectUri || `${process.env.FRONTEND_URL}/profile`;
 
       this.logger.info('Authentication successful, redirecting to profile', { userId: user.id });
       res.redirect(`${redirectUri}?state=${state}`);
