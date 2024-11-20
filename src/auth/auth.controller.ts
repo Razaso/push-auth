@@ -25,12 +25,13 @@ export class AuthController {
   @Get('authorize-email')
   async authorizeEmail(
     @Query('email') email: string,
+    @Query('redirectUri') redirectUri: string,
     @Res() res: Response
   ) {
-    this.logger.debug('Processing email authorization request', { email });
+    this.logger.debug('Processing email authorization request', { email, redirectUri });
 
     try {
-      const authToken = await this.tokenService.createToken('pending');
+      const authToken = await this.tokenService.createToken('pending', { redirectUri });
       this.logger.debug('Created pending auth token', { tokenId: authToken.id });
     
       const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
