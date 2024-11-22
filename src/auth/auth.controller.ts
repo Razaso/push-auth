@@ -53,7 +53,7 @@ export class AuthController {
 
   @Get('authorize-social')
   async authorizeSocial(
-    @Query('provider') provider: 'github' | 'google' | 'discord' | 'twitter',
+    @Query('provider') provider: 'github' | 'google' | 'discord' | 'twitter' | 'apple',
     @Query('redirectUri') redirectUri: string,
     @Res() res: Response
   ) {
@@ -67,7 +67,8 @@ export class AuthController {
         google: 'google-oauth2',
         github: 'github',
         discord: 'discord',
-        twitter: 'twitter'
+        twitter: 'twitter',
+        apple: 'apple'
       };
 
       const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +

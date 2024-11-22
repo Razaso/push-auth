@@ -31,9 +31,15 @@ export class AuthService {
       const url = `https://${process.env.AUTH0_DOMAIN}${endpoint}`;
       this.logger.info(`Calling Auth0 API: ${method.toUpperCase()} ${endpoint}`);
       
+      // Merge the timeout setting with existing config
+      const configWithTimeout = {
+        ...config,
+        timeout: 15000, // 15 seconds
+      };
+
       const response = method === 'get' 
-        ? await axios.get<T>(url, config)
-        : await axios.post<T>(url, config.data, config);
+        ? await axios.get<T>(url, configWithTimeout)
+        : await axios.post<T>(url, config.data, configWithTimeout);
       return response.data;
     } catch (error) {
       // Log rate limits for monitoring
