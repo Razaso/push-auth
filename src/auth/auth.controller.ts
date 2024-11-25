@@ -25,12 +25,13 @@ export class AuthController {
   @Get('authorize-email')
   async authorizeEmail(
     @Query('email') email: string,
+    @Query('redirectUri') redirectUri: string,
     @Res() res: Response
   ) {
-    this.logger.debug('Processing email authorization request', { email });
+    this.logger.debug('Processing email authorization request', { email, redirectUri });
 
     try {
-      const authToken = await this.tokenService.createToken('pending');
+      const authToken = await this.tokenService.createToken('pending', { redirectUri });
       this.logger.debug('Created pending auth token', { tokenId: authToken.id });
     
       const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
@@ -52,7 +53,7 @@ export class AuthController {
 
   @Get('authorize-social')
   async authorizeSocial(
-    @Query('provider') provider: 'github' | 'google' | 'discord' | 'twitter',
+    @Query('provider') provider: 'github' | 'google' | 'discord' | 'twitter' | 'apple',
     @Query('redirectUri') redirectUri: string,
     @Res() res: Response
   ) {
@@ -66,7 +67,8 @@ export class AuthController {
         google: 'google-oauth2',
         github: 'github',
         discord: 'discord',
-        twitter: 'twitter'
+        twitter: 'twitter',
+        apple: 'apple'
       };
 
       const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
