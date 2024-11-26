@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: 'Deployment'
+metadata:
+  name: 'push-auth-node'
+  namespace: 'apps'
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: 'push-auth-node'
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 50%
+      maxUnavailable: 50%
+  template:
+    metadata:
+      labels:
+        app: 'push-auth-node'
+    spec:
+      containers:
+        - name: 'push-auth-node'
+          image: 'us-central1-docker.pkg.dev/push-prod-apps/ar-p-services-base-usce1/push-auth-node-image:init'
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "1000m"
+            limits:
+              memory: "1Gi"
+              cpu: "1200m"
+          livenessProbe:
+            initialDelaySeconds: 60
+            periodSeconds: 5
+            failureThreshold: 3
+            timeoutSeconds: 60
+            httpGet:
+              path: /health
+              port: 3000
+          readinessProbe:
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 60
+            httpGet:
+              path: /health
+              port: 3000
+          env:
+            - name: SESSION_SECRET
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-node-apps-configmap
+                  key: SESSION_SECRET
+            - name: JWT_SECRET
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-node-apps-configmap
+                  key: JWT_SECRET
+            - name: RP_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-node-apps-configmap
+                  key: RP_ID
+            - name: FRONTEND_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-node-apps-configmap
+                  key: FRONTEND_URL
+            - name: BACKEND_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-node-apps-configmap
+                  key: BACKEND_URL
+            - name: DATABASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-node-apps-configmap
+                  key: DATABASE_URL
+            - name: AUTH0_DOMAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-node-apps-configmap
+                  key: AUTH0_DOMAIN
+            - name: AUTH0_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-node-apps-configmap
+                  key: AUTH0_CLIENT_ID
+            - name: AUTH0_CLIENT_SECRET
+              valueFrom:
+                configMapKeyRef:
+                  name: auth-node-apps-configmap
+                  key: AUTH0_CLIENT_SECRET  
+      serviceAccountName: sa-apps
+      nodeSelector:
+        iam.gke.io/gke-metadata-server-enabled: 'true'
