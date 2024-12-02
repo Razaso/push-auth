@@ -1,4 +1,4 @@
-import { Controller, Post, Put, Body, Get, Param, NotFoundException, Inject } from '@nestjs/common';
+import { Controller, Post, Put, Body, Get, Param, NotFoundException, Inject, Headers } from '@nestjs/common';
 import { PasskeyService } from './passkey.service';
 import { WINSTON_MODULE_PROVIDER } from 'nest-winston';
 import { Logger } from 'winston';
@@ -12,13 +12,17 @@ export class PasskeyController {
 
 
   @Post('register-credential')
-  async registerCredential(@Body() data: { userId: string }) {
+  async registerCredential(
+    @Body() data: { userId: string },
+    @Headers('origin') origin: string
+  ) {
     this.logger.info('Initiating passkey registration', { 
       userId: data.userId,
+      origin,
       context: 'PasskeyController.registerCredential'
     });
   
-    const options = await this.passkeyService.generateRegistrationOptions(data.userId);
+    const options = await this.passkeyService.generateRegistrationOptions(data.userId, origin);
     
     this.logger.debug('Generated registration options', { 
       userId: data.userId,
@@ -46,23 +50,26 @@ export class PasskeyController {
   }
 
   @Post('verify-registration')
-  async verifyRegistration(@Body() data: { userId: string; credential: any }) {
+  async verifyRegistration(
+    @Body() data: { userId: string; credential: any },
+    @Headers('origin') origin: string
+  ) {
 
     this.logger.info('Verifying passkey registration', { 
       userId: data.userId,
       context: 'PasskeyController.verifyRegistration'
     });
 
-    return this.passkeyService.verifyRegistration(data.userId, data.credential);
+    return this.passkeyService.verifyRegistration(data.userId, data.credential, origin);
   }
 
   @Get('challenge/:userId')
-  async getChallenge(@Param('userId') userId: string) {
+  async getChallenge(@Param('userId') userId: string, @Headers('origin') origin: string) {
     this.logger.info('Generating authentication challenge', { 
       userId,
       context: 'PasskeyController.getChallenge'
     });
-    return await this.passkeyService.generateAuthenticationChallenge(userId);
+    return await this.passkeyService.generateAuthenticationChallenge(userId, origin);
   }
 
   @Post('verify/:userId')
@@ -74,14 +81,15 @@ export class PasskeyController {
       authenticatorData: string;
       clientDataJSON: string;
       signature: string;
-    }
+    },
+    @Headers('origin') origin: string
   ) {
     this.logger.info('Verifying authentication', { 
       userId,
       credentialId: credential.id,
       context: 'PasskeyController.verifyAuthentication'
     });
-    return await this.passkeyService.verifyAuthentication(userId, credential);
+    return await this.passkeyService.verifyAuthentication(userId, credential, origin);
   }
 
   @Put('transaction/:userId')

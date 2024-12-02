@@ -30,20 +30,60 @@ export class PasskeyService {
   ) {}
 
   private readonly rpName = 'Push Protocol';
-  private readonly rpID = process.env.RP_ID;
-  private readonly origin = process.env.FRONTEND_URL;
+  private readonly rpIDs = this.parseEnvArray(process.env.ALLOWED_RP_IDS);
+  private readonly allowedOrigins = this.parseEnvArray(process.env.ALLOWED_ORIGINS);
 
-  async generateRegistrationOptions(userId: string) {
+  private parseEnvArray(envVar: string | undefined): string[] {
+    return envVar?.split(',').map(item => item.trim()).filter(Boolean) || [];
+  }
+
+  private getOrigin(originFromRequest: string) {
+    try {
+        const url = new URL(originFromRequest);
+        if (this.rpIDs.includes(url.hostname) && this.allowedOrigins.includes(originFromRequest)) {
+          return {
+            origin: originFromRequest,
+            rpID: url.hostname
+          };
+        }
+    } catch (error) {
+        this.logger.error('Invalid origin', { error, originFromRequest });
+    }
+    throw new Error('Invalid origin');
+  }
+
+  async generateRegistrationOptions(userId: string, originFromRequest: string) {
+    const { origin, rpID } = this.getOrigin(originFromRequest);
+
     this.logger.info('Generating registration options', { 
       userId,
+      origin,
+      rpID,
       context: 'PasskeyService.generateRegistrationOptions'
     });
 
+    let username: string;
+    // Fetch user to get email
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, provider: true }
+    });
+
+    if (!user?.email) {
+      this.logger.error('User email not found', {
+        userId,
+        context: 'PasskeyService.generateRegistrationOptions'
+      });
+      username = 'push-user';
+    } else {
+      username = this.formatUsername(user.email, user.provider);
+    }
+
     const options = await generateRegistrationOptions({
       rpName: this.rpName,
-      rpID: this.rpID,
+      rpID: rpID,
       userID: userId,
-      userName: 'push-user',
+      userName: username,
       attestationType: 'none',
       authenticatorSelection: {
         authenticatorAttachment: 'platform',
@@ -80,8 +120,8 @@ export class PasskeyService {
         type: 'REGISTRATION',
         expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
         metadata: {
-          rpId: this.rpID,
-          origin: this.origin,
+          rpId: rpID,
+          origin: origin,
           timestamp: new Date().toISOString()
         }
       }
@@ -90,9 +130,13 @@ export class PasskeyService {
     return options;
   }
 
-  async verifyRegistration(userId: string, credential: any) {
+  async verifyRegistration(userId: string, credential: any, originFromRequest: string) {
+    const { origin, rpID } = this.getOrigin(originFromRequest);
+
     this.logger.info('Verifying registration', { 
       userId,
+      origin,
+      rpID,
       context: 'PasskeyService.verifyRegistration'
     });
     
@@ -114,8 +158,8 @@ export class PasskeyService {
       const verification = await verifyRegistrationResponse({
         response: credential,
         expectedChallenge: challenge.challenge,
-        expectedOrigin: this.origin,
-        expectedRPID: this.rpID,
+        expectedOrigin: origin,
+        expectedRPID: rpID,
       });
 
       if (verification.verified) {
@@ -200,14 +244,18 @@ export class PasskeyService {
     }
   }
 
-  async generateAuthenticationChallenge(userId: string) {
+  async generateAuthenticationChallenge(userId: string, originFromRequest: string) {
+    const { origin, rpID } = this.getOrigin(originFromRequest);
+
     this.logger.debug('Generating authentication challenge', { 
       userId,
+      origin,
+      rpID,
       context: 'PasskeyService.generateAuthenticationChallenge'
     });
 
     const options = await generateAuthenticationOptions({
-      rpID: this.rpID,
+      rpID: rpID,
       userVerification: 'required',
     });
 
@@ -240,8 +288,8 @@ export class PasskeyService {
         type: 'AUTHENTICATION',
         expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
         metadata: {
-          rpId: this.rpID,
-          origin: this.origin,
+          rpId: rpID,
+          origin: origin,
           timestamp: new Date().toISOString(),
           authenticationType: 'platform'
         }
@@ -251,10 +299,14 @@ export class PasskeyService {
     return options;
   }
 
-  async verifyAuthentication(userId: string, credential: any) {
+  async verifyAuthentication(userId: string, credential: any, originFromRequest: string) {
+    const { origin, rpID } = this.getOrigin(originFromRequest);
+
     this.logger.debug('Starting authentication verification', { 
       userId,
       credentialId: credential.id,
+      origin,
+      rpID,
       context: 'PasskeyService.verifyAuthentication'
     });
 
@@ -331,8 +383,8 @@ export class PasskeyService {
       const verification = await verifyAuthenticationResponse({
         response: formattedCredential,
         expectedChallenge: decodedChallenge,
-        expectedOrigin: this.origin,
-        expectedRPID: this.rpID,
+        expectedOrigin: origin,
+        expectedRPID: rpID,
         authenticator: {
           credentialID: Buffer.from(authenticator.credentialId),
           credentialPublicKey: Buffer.from(authenticator.publicKey, 'base64'),
@@ -471,5 +523,12 @@ export class PasskeyService {
     }
 
     return transaction;
+  }
+
+  private formatUsername(email: string, type: string): string {
+    const first3 = email.slice(0, 3);
+    const stars = '***';
+    const last5 = email.slice(-5);
+    return `push-${first3}${stars}${last5}-${type}-auth`;
   }
 }

@@ -24,6 +24,7 @@ model User {
   phone     String?
   username  String
   avatarUrl String?
+  provider  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   mnemonicShares MnemonicShare[]

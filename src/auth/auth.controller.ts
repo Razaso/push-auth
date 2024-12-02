@@ -22,6 +22,29 @@ export class AuthController {
     // Auth0 will handle the login
   }
 
+  private validateRedirectUri(redirectUri: string | undefined): string {
+    if (!redirectUri) {
+        this.logger.error('redirectUri is required');
+        throw new BadRequestException('redirectUri is required');
+    }
+
+    try {
+        const url = new URL(redirectUri);
+        const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').map(o => o.trim()).filter(Boolean) || [];
+        const origin = `${url.protocol}//${url.host}`;
+
+        if (!allowedOrigins.includes(origin)) {
+            this.logger.error('Invalid redirectUri origin', { origin });
+            throw new BadRequestException('Invalid redirectUri origin');
+        }
+
+        return redirectUri;
+    } catch (error) {
+        this.logger.error('Invalid redirectUri format', { error });
+        throw new BadRequestException('Invalid redirectUri format');
+    }
+  }
+
   @Get('authorize-email')
   async authorizeEmail(
     @Query('email') email: string,
@@ -29,9 +52,10 @@ export class AuthController {
     @Res() res: Response
   ) {
     this.logger.debug('Processing email authorization request', { email, redirectUri });
+    const validatedRedirectUri = this.validateRedirectUri(redirectUri);
 
     try {
-      const authToken = await this.tokenService.createToken('pending', { redirectUri });
+      const authToken = await this.tokenService.createToken('pending', { redirectUri: validatedRedirectUri });
       this.logger.debug('Created pending auth token', { tokenId: authToken.id });
     
       const auth0Url = `https://${process.env.AUTH0_DOMAIN}/authorize?` +
@@ -58,9 +82,10 @@ export class AuthController {
     @Res() res: Response
   ) {
     this.logger.debug('Processing social authorization request', { provider, redirectUri });
+    const validatedRedirectUri = this.validateRedirectUri(redirectUri);
 
     try {
-      const authToken = await this.tokenService.createToken('pending', { redirectUri });
+      const authToken = await this.tokenService.createToken('pending', { redirectUri: validatedRedirectUri });
       this.logger.debug('Created pending auth token', { tokenId: authToken.id });
 
       const connectionMap = {
@@ -111,7 +136,7 @@ export class AuthController {
       const jwt = await this.authService.generateJWT(user, tokens);
 
       await this.tokenService.updateToken(state, jwt);
-      const redirectUri = storedToken.redirectUri || `${process.env.FRONTEND_URL}/profile`;
+      const redirectUri = storedToken.redirectUri;
 
       this.logger.info('Authentication successful, redirecting to profile', { userId: user.id });
       res.redirect(`${redirectUri}?state=${state}`);
