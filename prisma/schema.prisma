@@ -1,0 +1,97 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TokenType {
+  STATE
+}
+
+model User {
+  id        String   @id @default(uuid())
+  auth0Id   String   @unique
+  email     String?
+  phone     String?
+  username  String
+  avatarUrl String?
+  provider  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  mnemonicShares MnemonicShare[]
+  mnemonicShareTransactions MnemonicShareTransaction[]
+  challenge     Challenge[]
+}
+
+model AuthToken {
+  id        String   @id @default(uuid())  // state parameter
+  token     String   // JWT or temp token
+  type      TokenType @default(STATE)
+  status    String
+  redirectUri String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  used      Boolean  @default(false)
+
+  @@index([expiresAt])
+}
+
+model Challenge {
+  id                  String    @id @default(cuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id])
+  challenge           String
+  type                String    @default("AUTHENTICATION")  // REGISTRATION or AUTHENTICATION
+  active              Boolean   @default(true)
+  used                Boolean   @default(false)
+  usedAt              DateTime?
+  createdAt           DateTime  @default(now())
+  expiresAt           DateTime
+  verificationSuccess Boolean?
+  metadata            Json?     // Stores context, errors, timestamps, etc.
+
+  @@index([userId])
+  @@index([userId, active, used])  // For efficient querying of active/unused challenges
+  @@index([createdAt])            // For audit queries
+  @@index([expiresAt])           // For cleanup jobs
+}
+
+model MnemonicShare {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  share           String
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, active])
+}
+
+// Share3's transaction hash stored on server (actual share on blockchain)
+model MnemonicShareTransaction {
+  id              String   @id @default(uuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  publicKey       String
+  counter         Int      @default(0)
+  credentialId    String   // WebAuthn credential ID
+  transactionHash String   // Hash of blockchain transaction containing Share3
+  iv              String   // IV used for encryption
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, active])
+}
