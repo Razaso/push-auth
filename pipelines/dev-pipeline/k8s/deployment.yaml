@@ -58,16 +58,16 @@ spec:
                 configMapKeyRef:
                   name: auth-node-apps-configmap
                   key: JWT_SECRET
-            - name: RP_ID
+            - name: ALLOWED_RP_IDS
               valueFrom:
                 configMapKeyRef:
                   name: auth-node-apps-configmap
-                  key: RP_ID
-            - name: FRONTEND_URL
+                  key: ALLOWED_RP_IDS
+            - name: ALLOWED_ORIGINS
               valueFrom:
                 configMapKeyRef:
                   name: auth-node-apps-configmap
-                  key: FRONTEND_URL
+                  key: ALLOWED_ORIGINS
             - name: BACKEND_URL
               valueFrom:
                 configMapKeyRef:
