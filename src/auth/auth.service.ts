@@ -114,6 +114,7 @@ export class AuthService {
             username,
             avatarUrl: auth0User.picture,
             updatedAt: new Date(),
+            provider,
           },
           create: {
             phone: auth0User.phone_number,
@@ -121,6 +122,7 @@ export class AuthService {
             username,
             auth0Id: auth0User.sub,
             avatarUrl: auth0User.picture,
+            provider,
           },
         });
       } else {
@@ -133,6 +135,7 @@ export class AuthService {
             username,
             avatarUrl: auth0User.picture,
             updatedAt: new Date(),
+            provider,
           },
           create: {
             email,
@@ -140,6 +143,7 @@ export class AuthService {
             username,
             auth0Id: auth0User.sub,
             avatarUrl: auth0User.picture,
+            provider,
           },
         });
       }
